@@ -17,6 +17,7 @@ import shelve
 import subprocess
 import sys
 import tempfile
+import time
 
 debug_mem = False
 if debug_mem:
@@ -34,6 +35,7 @@ menagerie = ""
 cnt = 0
 
 devnull = open(os.devnull, 'w')
+one_mb = 1024.0 * 1024.0
 
 def exit_msg(msg=None, status=1):
 	if msg is not None:
@@ -66,15 +68,16 @@ def sort_nicely(l):
 # A counter indicates the number of successive branches in the execution path of the associated 
 # capture file starting from the corresponding branch.
 
-bcd_name = os.path.join(
+bpd_name = os.path.join(
 	tempfile.gettempdir(),
 	('distill_menagerie_branch_%d' % os.getpid())
 	)
-branch_pcap_dic = shelve.open(bcd_name)
+branch_pcap_dic = shelve.open(bpd_name)
 
+## Try to clean up the branch dictionary and remove its backing file.
 def cleanup():
 	branch_pcap_dic.close()
-	os.unlink(bcd_name)
+	os.unlink(bpd_name)
 
 ## Create the directory "to_remove" in the menagerie directory and move the capture files to remove to that directory.
 #  @param[in]	captures_to_rm	set containing the names of the capture files to remove
@@ -122,6 +125,7 @@ def fill_branch_pcap_dic_counters():
 
 ## Read the execution path of a capture file and store it into the global branch_pcap_dic dictionary.
 #  @param[in]	pcap	capture file to process
+#  @return		the number of branches found
 def read_pcap_path(pcap):
 	global branch_pcap_dic, src_branches
 
@@ -130,6 +134,7 @@ def read_pcap_path(pcap):
 		if not branch_pcap_dic.has_key(branch):
 			branch_pcap_dic[branch] = {}		
 		branch_pcap_dic[branch][pcap] = 0
+	return len(branches)
 		
 ## Run TShark on a capture file under Pin and store the execution path of TShark into "MyPinTool.out" file.
 #  @param[in]	pcap	capture file to process with TShark
@@ -165,14 +170,24 @@ def distill_menagerie():
 
 	files = sort_nicely(os.listdir(menagerie))
 	print('Total file count: %d' % len(files))
+	# Process the first item twice for sanity checking.
+	files.insert(0, files[0])
 	for filename in files:
 		if debug_mem:
-			print('Size of branch_pcap_dic: %.2f M' % (asizeof(branch_pcap_dic) / 1024.0 / 1024.0))
+			print('Size of branch_pcap_dic: %.2f M' % (asizeof(branch_pcap_dic) / one_mb))
 		if file_is_pcap(filename):
-			print filename
+			start = time.time()
 			write_pcap_path(filename)
-			read_pcap_path(filename)
+			end = time.time()
+			branches = read_pcap_path(filename)
 			cnt = cnt+1
+			print('%s: %d/%d branches, %.2f MB store, %.2f s' % (
+				filename,
+				branches, 
+				len(branch_pcap_dic),
+				os.stat(bpd_name).st_size / one_mb,
+				end - start
+			))
 	print('Pcap count: %d' % cnt)
 	if (cnt < 1):
 		exit_msg('No valid capture files found.')
@@ -206,7 +221,7 @@ def main():
 	parse_cmd()	
 	try:
 		distill_menagerie()
-	except:
+	except KeyboardInterrupt:
 		pass
 	finally:
 		cleanup()
