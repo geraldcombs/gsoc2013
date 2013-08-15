@@ -66,12 +66,15 @@ def sort_nicely(l):
 # A counter indicates the number of successive branches in the execution path of the associated 
 # capture file starting from the corresponding branch.
 
-# XXX - We need to catch any exceptions below and clean up accordingly.
 bcd_name = os.path.join(
 	tempfile.gettempdir(),
 	('distill_menagerie_branch_%d' % os.getpid())
 	)
 branch_pcap_dic = shelve.open(bcd_name)
+
+def cleanup():
+	branch_pcap_dic.close()
+	os.unlink(bcd_name)
 
 ## Create the directory "to_remove" in the menagerie directory and move the capture files to remove to that directory.
 #  @param[in]	captures_to_rm	set containing the names of the capture files to remove
@@ -201,7 +204,12 @@ def parse_cmd():
 	
 def main():
 	parse_cmd()	
-	distill_menagerie()
+	try:
+		distill_menagerie()
+	except:
+		pass
+	finally:
+		cleanup()
 
 if __name__ == "__main__":
 	main()
