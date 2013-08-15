@@ -6,13 +6,24 @@ distill_menagerie.py
 Increases the quality of a capture file collection.
 '''
 
-import sys
 from optparse import OptionParser
+import commands
+import operator
 import os
 import os.path
-import operator
-import commands
+import platform
+import re
+import shelve
 import subprocess
+import sys
+import tempfile
+
+debug_mem = False
+if debug_mem:
+	try:
+		from pympler.asizeof import asizeof
+	except:
+		debug_mem = False
 
 # command line arguments
 tshark = ""
@@ -30,6 +41,15 @@ def exit_msg(msg=None, status=1):
 	sys.stderr.write(__doc__ + '\n')
 	sys.exit(status)
 
+# http://www.codinghorror.com/blog/2007/12/sorting-for-humans-natural-sort-order.html
+def sort_nicely(l):
+	''' Sort the given list in the way that humans expect.
+	'''
+	convert = lambda text: int(text) if text.isdigit() else text
+	alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ]
+	l.sort( key=alphanum_key )
+	return l
+
 
 # branch_pcap_dic sample:
 #
@@ -45,7 +65,13 @@ def exit_msg(msg=None, status=1):
 # which execution path contains the corresponding branch address, and values are counters.
 # A counter indicates the number of successive branches in the execution path of the associated 
 # capture file starting from the corresponding branch.
-branch_pcap_dic = {}
+
+# XXX - We need to catch any exceptions below and clean up accordingly.
+bcd_name = os.path.join(
+	tempfile.gettempdir(),
+	('distill_menagerie_branch_%d' % os.getpid())
+	)
+branch_pcap_dic = shelve.open(bcd_name)
 
 ## Create the directory "to_remove" in the menagerie directory and move the capture files to remove to that directory.
 #  @param[in]	captures_to_rm	set containing the names of the capture files to remove
@@ -107,6 +133,7 @@ def read_pcap_path(pcap):
 def write_pcap_path(pcap):
 	pcap_path = os.path.join(menagerie, pcap)
 	res = subprocess.call([
+		'setarch', platform.machine(), '-R',
 		pin,
 		'-injection', 'child',
 		'-t', pintool,
@@ -114,7 +141,7 @@ def write_pcap_path(pcap):
 		tshark, '-nVxr', pcap_path,
 		],
 		stdout=devnull, stderr=devnull)
-	print('Results for %s: %s' % (pcap_path, res))
+	#print('Results for %s: %s' % (pcap_path, res))
 		#"%s -injection child -t %s -- %s -nVxr %s/%s > /dev/null" % (pin, pintool, tshark, menagerie, pcap))
 
 ## Check if a file is a capture file.
@@ -133,15 +160,16 @@ def file_is_pcap(filename):
 def distill_menagerie():
 	global cnt
 
-	files = os.listdir(menagerie)
+	files = sort_nicely(os.listdir(menagerie))
 	print('Total file count: %d' % len(files))
 	for filename in files:
+		if debug_mem:
+			print('Size of branch_pcap_dic: %.2f M' % (asizeof(branch_pcap_dic) / 1024.0 / 1024.0))
 		if file_is_pcap(filename):
 			print filename
 			write_pcap_path(filename)
 			read_pcap_path(filename)
 			cnt = cnt+1
-			print cnt
 	print('Pcap count: %d' % cnt)
 	if (cnt < 1):
 		exit_msg('No valid capture files found.')
